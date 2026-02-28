@@ -10,6 +10,9 @@ REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 SEGMENT_MINUTES = int(os.environ.get("SEGMENT_MINUTES", "30"))
 RETENTION_HOURS = int(os.environ.get("RETENTION_HOURS", "6"))
 TEMP_DIR = "/tmp/recordings"
+REFERER = os.environ.get("REFERER", "https://endirecttv.com/")
+ORIGIN = os.environ.get("ORIGIN", "https://endirecttv.com")
+USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0"
 
 s3 = boto3.client("s3", region_name=REGION,
     aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
@@ -25,29 +28,32 @@ def record_segment():
     try:
         result = subprocess.run([
             "ffmpeg", "-y",
-            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "-user_agent", USER_AGENT,
+            "-headers", f"Referer: {REFERER}\r\nOrigin: {ORIGIN}\r\n",
             "-reconnect", "1",
             "-reconnect_streamed", "1",
             "-reconnect_delay_max", "5",
             "-i", STREAM_URL,
-            "-t", str(SEGMENT_MINUTES*60),
+            "-t", str(SEGMENT_MINUTES * 60),
             "-c", "copy",
             "-bsf:a", "aac_adtstoasc",
             "-movflags", "+faststart",
             filepath
-        ], capture_output=True, text=True, timeout=SEGMENT_MINUTES*60+120)
+        ], capture_output=True, text=True, timeout=SEGMENT_MINUTES * 60 + 120)
         if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-            print(f"  Uploading to s3://{BUCKET}/{s3_key}")
-            s3.upload_file(filepath, BUCKET, s3_key, ExtraArgs={"ContentType":"video/mp4"})
+            size_mb = os.path.getsize(filepath) / (1024 * 1024)
+            print(f"  Uploading {filename} ({size_mb:.1f}MB) to s3://{BUCKET}/{s3_key}")
+            s3.upload_file(filepath, BUCKET, s3_key, ExtraArgs={"ContentType": "video/mp4"})
             os.remove(filepath)
             print(f"  Done: {s3_key}")
         else:
-            print(f"  ERROR: Recording failed")
+            print(f"  ERROR: Recording failed or empty file")
             if result.stderr: print(f"  ffmpeg: {result.stderr[-1000:]}")
             time.sleep(30)
     except subprocess.TimeoutExpired:
+        print(f"  Timeout, uploading partial file...")
         if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-            s3.upload_file(filepath, BUCKET, s3_key, ExtraArgs={"ContentType":"video/mp4"})
+            s3.upload_file(filepath, BUCKET, s3_key, ExtraArgs={"ContentType": "video/mp4"})
             os.remove(filepath)
     except Exception as e:
         print(f"  ERROR: {e}")
@@ -73,7 +79,9 @@ def cleanup_loop():
         cleanup_old()
 
 if __name__ == "__main__":
-    print(f"=== HLS Recorder === Bucket:{BUCKET} Seg:{SEGMENT_MINUTES}m Ret:{RETENTION_HOURS}h")
+    print(f"=== HLS Recorder ===")
+    print(f"Stream: {STREAM_URL[:80]}...")
+    print(f"Bucket: {BUCKET} | Segment: {SEGMENT_MINUTES}m | Retention: {RETENTION_HOURS}h")
     t = threading.Thread(target=cleanup_loop, daemon=True); t.start()
     cleanup_old()
     while True:
