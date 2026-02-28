@@ -10,9 +10,14 @@ REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 SEGMENT_MINUTES = int(os.environ.get("SEGMENT_MINUTES", "30"))
 RETENTION_HOURS = int(os.environ.get("RETENTION_HOURS", "6"))
 TEMP_DIR = "/tmp/recordings"
-REFERER = os.environ.get("REFERER", "https://endirecttv.com/")
-ORIGIN = os.environ.get("ORIGIN", "https://endirecttv.com")
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0"
+HEADERS = (
+    "Referer: https://hls-live-stream.onrender.com/\r\n"
+    "Origin: https://hls-live-stream.onrender.com\r\n"
+    "Sec-Fetch-Dest: empty\r\n"
+    "Sec-Fetch-Mode: cors\r\n"
+    "Sec-Fetch-Site: cross-site\r\n"
+)
 
 s3 = boto3.client("s3", region_name=REGION,
     aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
@@ -29,7 +34,7 @@ def record_segment():
         result = subprocess.run([
             "ffmpeg", "-y",
             "-user_agent", USER_AGENT,
-            "-headers", f"Referer: {REFERER}\r\nOrigin: {ORIGIN}\r\n",
+            "-headers", HEADERS,
             "-reconnect", "1",
             "-reconnect_streamed", "1",
             "-reconnect_delay_max", "5",
@@ -47,7 +52,7 @@ def record_segment():
             os.remove(filepath)
             print(f"  Done: {s3_key}")
         else:
-            print(f"  ERROR: Recording failed or empty file")
+            print(f"  ERROR: Recording failed")
             if result.stderr: print(f"  ffmpeg: {result.stderr[-1000:]}")
             time.sleep(30)
     except subprocess.TimeoutExpired:
