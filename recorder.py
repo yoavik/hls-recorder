@@ -23,9 +23,19 @@ def record_segment():
     s3_key = f"recordings/{now.strftime('%Y-%m-%d')}/{filename}"
     print(f"[{now.isoformat()}] Recording {SEGMENT_MINUTES}min -> {filename}")
     try:
-        result = subprocess.run(["ffmpeg","-y","-i",STREAM_URL,"-t",str(SEGMENT_MINUTES*60),
-            "-c","copy","-movflags","+faststart",filepath],
-            capture_output=True, text=True, timeout=SEGMENT_MINUTES*60+120)
+        result = subprocess.run([
+            "ffmpeg", "-y",
+            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
+            "-i", STREAM_URL,
+            "-t", str(SEGMENT_MINUTES*60),
+            "-c", "copy",
+            "-bsf:a", "aac_adtstoasc",
+            "-movflags", "+faststart",
+            filepath
+        ], capture_output=True, text=True, timeout=SEGMENT_MINUTES*60+120)
         if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
             print(f"  Uploading to s3://{BUCKET}/{s3_key}")
             s3.upload_file(filepath, BUCKET, s3_key, ExtraArgs={"ContentType":"video/mp4"})
@@ -33,7 +43,8 @@ def record_segment():
             print(f"  Done: {s3_key}")
         else:
             print(f"  ERROR: Recording failed")
-            if result.stderr: print(f"  {result.stderr[:500]}")
+            if result.stderr: print(f"  ffmpeg: {result.stderr[-1000:]}")
+            time.sleep(30)
     except subprocess.TimeoutExpired:
         if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
             s3.upload_file(filepath, BUCKET, s3_key, ExtraArgs={"ContentType":"video/mp4"})
@@ -41,6 +52,7 @@ def record_segment():
     except Exception as e:
         print(f"  ERROR: {e}")
         if os.path.exists(filepath): os.remove(filepath)
+        time.sleep(30)
 
 def cleanup_old():
     print(f"[Cleanup] Removing files older than {RETENTION_HOURS}h...")
@@ -66,4 +78,4 @@ if __name__ == "__main__":
     cleanup_old()
     while True:
         try: record_segment()
-        except Exception as e: print(f"Error: {e}"); time.sleep(10)
+        except Exception as e: print(f"Error: {e}"); time.sleep(30)
